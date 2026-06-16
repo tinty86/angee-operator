@@ -52,15 +52,16 @@ angee dev          # start container + local Services together
 To bootstrap a fresh stack from a Stack template:
 
 ```sh
-angee init --dev --yes
+angee init --dev --bootstrap --yes
 ```
 
-`--dev` resolves the `dev` Stack template through the configured
-template search paths (see [Templates](/guide/templates)). The default
-Host that ships a `dev` Stack template is
+`--dev` resolves the `dev` Stack template through the configured template search
+paths (see [Templates](/guide/templates)). `--bootstrap` installs any missing
+mandatory host tools that Angee knows how to install before the template is
+rendered. The default Host that ships a `dev` Stack template is
 [`angee-django`](https://github.com/ang-ee/angee-django) — its
-`templates/stacks/dev/` is what gets rendered when you run `angee init
---dev` from inside that repo or its workspaces.
+`templates/stacks/dev/` is what gets rendered when you run `angee init --dev`
+from inside that repo or its workspaces.
 
 ## A typical development loop
 

@@ -7,6 +7,10 @@ Requirements:
 - git
 - process-compose, for local-process services
 
+Run `angee bootstrap --dry-run` to inspect missing host tools, or
+`angee bootstrap` to install the missing tools that Angee can install on the
+current OS.
+
 ## Make Targets
 
 ```sh

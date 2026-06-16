@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,10 +13,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ang-ee/angee-operator/internal/bootstrap"
 	"github.com/ang-ee/angee-operator/internal/runtime"
 )
-
-const processComposeInstallPackage = "github.com/f1bonacc1/process-compose@latest"
 
 type Runner interface {
 	Run(ctx context.Context, dir string, env []string, name string, args ...string) ([]byte, error)
@@ -37,11 +35,8 @@ func (ExecRunner) Run(ctx context.Context, dir string, env []string, name string
 }
 
 type Backend struct {
-	Runner                Runner
-	Stdin                 io.Reader
-	LookupPath            func(string) (string, error)
-	GoBinPath             func(context.Context) (string, error)
-	InstallProcessCompose func(context.Context, io.Writer, io.Writer) error
+	Runner     Runner
+	LookupPath func(string) (string, error)
 }
 
 func NewBackend() Backend {
@@ -50,6 +45,14 @@ func NewBackend() Backend {
 
 func (b Backend) Build(context.Context, runtime.Target) error {
 	return nil
+}
+
+// EnsureAvailable resolves process-compose before other runtime work starts,
+// returning an actionable error (pointing at `angee bootstrap`) when it is
+// missing.
+func (b Backend) EnsureAvailable(ctx context.Context) error {
+	_, err := b.processComposeBinary(ctx)
+	return err
 }
 
 func (b Backend) Up(ctx context.Context, target runtime.Target) error {
@@ -200,7 +203,7 @@ func (b Backend) run(ctx context.Context, root string, envFile string, args ...s
 	name := "process-compose"
 	if isExecRunner(b.Runner) {
 		var err error
-		name, err = b.processComposeBinary(ctx, nil, nil, nil, false)
+		name, err = b.processComposeBinary(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -218,7 +221,7 @@ func (b Backend) runLimited(ctx context.Context, root string, envFile string, ma
 			return b.run(ctx, root, envFile, args...)
 		}
 	}
-	name, err := b.processComposeBinary(ctx, nil, nil, nil, false)
+	name, err := b.processComposeBinary(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +242,7 @@ func (b Backend) runLimited(ctx context.Context, root string, envFile string, ma
 }
 
 func (b Backend) runForeground(ctx context.Context, root string, envFile string, stdout io.Writer, stderr io.Writer, args ...string) error {
-	name, err := b.processComposeBinary(ctx, b.input(), stdout, stderr, true)
+	name, err := b.processComposeBinary(ctx)
 	if err != nil {
 		return err
 	}
@@ -268,118 +271,11 @@ func (b Backend) runForeground(ctx context.Context, root string, envFile string,
 	return nil
 }
 
-func (b Backend) processComposeBinary(ctx context.Context, stdin io.Reader, stdout io.Writer, stderr io.Writer, prompt bool) (string, error) {
-	if path, err := b.lookupPath()("process-compose"); err == nil {
-		return path, nil
-	}
-	if path, err := b.goBinProcessCompose(ctx); err == nil {
-		return path, nil
-	}
-	if !prompt || !canPrompt(stdin, b.Stdin != nil) {
-		return "", missingProcessComposeError()
-	}
-	if !confirmInstall(stdin, stderr) {
-		return "", missingProcessComposeError()
-	}
-	if err := b.installProcessCompose()(ctx, stdout, stderr); err != nil {
-		return "", fmt.Errorf("install process-compose: %w", err)
-	}
-	if path, err := b.lookupPath()("process-compose"); err == nil {
-		return path, nil
-	}
-	if path, err := b.goBinProcessCompose(ctx); err == nil {
-		return path, nil
-	}
-	return "", fmt.Errorf("process-compose was installed but is not executable; add $(go env GOPATH)/bin to PATH")
-}
-
-func (b Backend) lookupPath() func(string) (string, error) {
-	if b.LookupPath != nil {
-		return b.LookupPath
-	}
-	return exec.LookPath
-}
-
-func (b Backend) input() io.Reader {
-	if b.Stdin != nil {
-		return b.Stdin
-	}
-	return os.Stdin
-}
-
-func (b Backend) goBinProcessCompose(ctx context.Context) (string, error) {
-	goBin, err := b.goBinPath(ctx)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(goBin, "process-compose")
-	if _, err := os.Stat(path); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func (b Backend) goBinPath(ctx context.Context) (string, error) {
-	if b.GoBinPath != nil {
-		return b.GoBinPath(ctx)
-	}
-	out, err := exec.CommandContext(ctx, "go", "env", "GOPATH").Output()
-	if err != nil {
-		return "", err
-	}
-	path := strings.TrimSpace(string(out))
-	if path == "" {
-		return "", errors.New("GOPATH is empty")
-	}
-	return filepath.Join(path, "bin"), nil
-}
-
-func (b Backend) installProcessCompose() func(context.Context, io.Writer, io.Writer) error {
-	if b.InstallProcessCompose != nil {
-		return b.InstallProcessCompose
-	}
-	return func(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
-		cmd := exec.CommandContext(ctx, "go", "install", processComposeInstallPackage)
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		return cmd.Run()
-	}
-}
-
-func canPrompt(stdin io.Reader, explicit bool) bool {
-	if stdin == nil {
-		return false
-	}
-	if explicit {
-		return true
-	}
-	f, ok := stdin.(*os.File)
-	if !ok {
-		return true
-	}
-	stat, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return stat.Mode()&os.ModeCharDevice != 0
-}
-
-func confirmInstall(stdin io.Reader, stderr io.Writer) bool {
-	if stderr == nil {
-		stderr = io.Discard
-	}
-	_, _ = fmt.Fprintf(stderr, "process-compose is required but was not found. Install it now with `go install %s`? [y/N] ", processComposeInstallPackage)
-	line, err := bufio.NewReader(stdin).ReadString('\n')
-	if err != nil && len(line) == 0 {
-		_, _ = fmt.Fprintln(stderr)
-		return false
-	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	return answer == "y" || answer == "yes"
-}
-
-func missingProcessComposeError() error {
-	return fmt.Errorf("process-compose is required; install it with `go install %s` or add it to PATH", processComposeInstallPackage)
+// processComposeBinary resolves the process-compose executable. Resolution and
+// the missing-tool error are delegated to the bootstrap package, the single
+// source of truth for locating and installing process-compose.
+func (b Backend) processComposeBinary(ctx context.Context) (string, error) {
+	return bootstrap.LookupProcessCompose(ctx, bootstrap.Options{LookupPath: b.LookupPath})
 }
 
 func isExecRunner(r Runner) bool {

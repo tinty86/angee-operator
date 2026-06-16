@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/ang-ee/angee-operator/internal/bootstrap"
 	"github.com/ang-ee/angee-operator/internal/copierx"
 	"github.com/ang-ee/angee-operator/internal/manifest"
 	"github.com/ang-ee/angee-operator/internal/stackroot"
@@ -123,54 +123,23 @@ func (r *doctorRunner) add(name string, status doctorStatus, detail string, hint
 }
 
 func (r *doctorRunner) checkTools(ctx context.Context) {
-	tools := []struct {
-		name string
-		args []string
-		hint string
-	}{
-		{name: "git", args: []string{"--version"}, hint: "Required for source and workspace commands."},
-		{name: "go", args: []string{"version"}, hint: "Required to build angee-go and to auto-install process-compose."},
-		{name: "uv", args: []string{"--version"}, hint: "Required by the bundled Django dev stack."},
-		{name: "node", args: []string{"--version"}, hint: "Required by the bundled React/Vite dev stack."},
-		{name: "pnpm", args: []string{"--version"}, hint: "Required by the bundled React/Vite dev stack."},
-		{name: "npx", args: []string{"--version"}, hint: "Required by the bundled playwright-mcp service."},
-		{name: "docker", args: []string{"--version"}, hint: "Required for container runtime services."},
-		{name: "process-compose", args: []string{"--version"}, hint: "Required for local dev runtime services; angee can prompt to install it when needed."},
-	}
-	for _, tool := range tools {
-		path, err := exec.LookPath(tool.name)
-		if err != nil {
-			r.add("tool."+tool.name, doctorWarn, "not found on PATH", tool.hint)
-			continue
+	report := bootstrap.Check(ctx, bootstrap.Options{})
+	for _, tool := range report.Tools {
+		switch tool.Status {
+		case bootstrap.StatusPresent:
+			detail := tool.Version
+			if detail == "" {
+				detail = tool.Path
+			}
+			r.add("tool."+tool.Name, doctorOK, detail, "")
+		default:
+			detail := tool.Detail
+			if tool.Path != "" {
+				detail = fmt.Sprintf("%s found but %s", tool.Path, tool.Detail)
+			}
+			r.add("tool."+tool.Name, doctorWarn, detail, tool.Hint)
 		}
-		version, err := commandVersion(ctx, path, tool.args)
-		if err != nil {
-			r.add("tool."+tool.name, doctorWarn, fmt.Sprintf("%s found but version check failed: %v", path, err), tool.hint)
-			continue
-		}
-		if version == "" {
-			version = path
-		}
-		r.add("tool."+tool.name, doctorOK, version, "")
 	}
-}
-
-func commandVersion(ctx context.Context, path string, args []string) (string, error) {
-	childCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(childCtx, path, args...)
-	out, err := cmd.CombinedOutput()
-	if childCtx.Err() != nil {
-		return "", childCtx.Err()
-	}
-	if err != nil {
-		return "", err
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 {
-		return "", nil
-	}
-	return strings.TrimSpace(lines[0]), nil
 }
 
 func (r *doctorRunner) checkManifest(root string) *manifest.Stack {

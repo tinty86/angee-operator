@@ -1,10 +1,8 @@
 package proccompose
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,53 +15,31 @@ type recordingRunner struct {
 	args []string
 }
 
-func TestProcessComposeBinaryPromptsAndInstalls(t *testing.T) {
-	installed := false
+func TestEnsureAvailableResolvesFromPath(t *testing.T) {
 	backend := Backend{
-		Stdin: strings.NewReader("yes\n"),
 		LookupPath: func(name string) (string, error) {
-			if installed {
-				return "/tmp/process-compose", nil
+			if name == "process-compose" {
+				return "/usr/bin/process-compose", nil
 			}
 			return "", errors.New("not found")
 		},
-		GoBinPath: func(context.Context) (string, error) {
-			return "", errors.New("no gopath")
-		},
-		InstallProcessCompose: func(context.Context, io.Writer, io.Writer) error {
-			installed = true
-			return nil
-		},
 	}
-	var stderr bytes.Buffer
-	path, err := backend.processComposeBinary(context.Background(), backend.input(), io.Discard, &stderr, true)
-	if err != nil {
-		t.Fatalf("processComposeBinary() error = %v", err)
-	}
-	if path != "/tmp/process-compose" {
-		t.Fatalf("path = %q, want /tmp/process-compose", path)
-	}
-	if !installed {
-		t.Fatal("installer was not called")
-	}
-	if !strings.Contains(stderr.String(), "Install it now") {
-		t.Fatalf("prompt = %q, want install prompt", stderr.String())
+	if err := backend.EnsureAvailable(context.Background()); err != nil {
+		t.Fatalf("EnsureAvailable() error = %v", err)
 	}
 }
 
-func TestProcessComposeBinaryDeclineInstall(t *testing.T) {
+func TestEnsureAvailableErrorsWhenMissing(t *testing.T) {
+	// LookupPath fails for process-compose and go, so bootstrap's $GOPATH/bin
+	// fallback cannot resolve it either: the result is the actionable error.
 	backend := Backend{
-		Stdin: strings.NewReader("n\n"),
-		LookupPath: func(name string) (string, error) {
+		LookupPath: func(string) (string, error) {
 			return "", errors.New("not found")
 		},
-		GoBinPath: func(context.Context) (string, error) {
-			return "", errors.New("no gopath")
-		},
 	}
-	_, err := backend.processComposeBinary(context.Background(), backend.input(), io.Discard, io.Discard, true)
+	err := backend.EnsureAvailable(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "process-compose is required") {
-		t.Fatalf("error = %v, want process-compose required", err)
+		t.Fatalf("EnsureAvailable() error = %v, want process-compose required", err)
 	}
 }
 

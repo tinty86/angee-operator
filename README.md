@@ -89,12 +89,19 @@ angee dev
 
 `angee init --dev --yes` is supported when a `dev` stack template is available
 through the template search paths.
+`angee init --dev --bootstrap --yes` installs missing mandatory host tools
+where the current OS has a known installer, then renders the `dev` stack
+template.
+`angee bootstrap --dry-run` shows what would be installed without changing the
+host.
 
 ## Core Commands
 
 ```sh
 # Stack
+angee bootstrap [--dry-run]
 angee doctor
+angee init --dev [path] [--bootstrap] [--input key=value ...] [--yes] [--force]
 angee stack init <template> [path] [--input key=value ...]
 angee stack update
 angee stack destroy [--purge]

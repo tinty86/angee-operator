@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ang-ee/angee-operator/api"
+	"github.com/ang-ee/angee-operator/internal/bootstrap"
 	"github.com/ang-ee/angee-operator/internal/operator"
 	"github.com/ang-ee/angee-operator/internal/platformclient"
 	"github.com/ang-ee/angee-operator/internal/service"
@@ -24,6 +25,9 @@ import (
 )
 
 var Version = "dev"
+
+var bootstrapRun = bootstrap.Run
+var bootstrapWriteReport = bootstrap.WriteReport
 
 func Execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -67,6 +71,7 @@ func NewRootWithIO(stdin io.Reader, stdout, stderr io.Writer) *cobra.Command {
 	cmd.AddCommand(tokenCommand(stdout, &root, &operatorURL, &jsonOutput))
 	cmd.AddCommand(secretCommand(stdout, stderr, &root, &operatorURL, &jsonOutput))
 	cmd.AddCommand(doctorCommand(stdout, &root, &jsonOutput))
+	cmd.AddCommand(bootstrapCommand(stdout, stderr, &jsonOutput))
 	cmd.AddCommand(internalCommand(stdout, &root, &operatorURL, &jsonOutput))
 	cmd.AddCommand(operatorCommand(stdout, stderr))
 	return cmd
@@ -76,6 +81,7 @@ func initCommand(stdout, stderr io.Writer, root, operatorURL *string) *cobra.Com
 	var dev bool
 	var force bool
 	var yes bool
+	var runBootstrap bool
 	var inputs []string
 	cmd := &cobra.Command{
 		Use:   "init [path]",
@@ -85,6 +91,18 @@ func initCommand(stdout, stderr io.Writer, root, operatorURL *string) *cobra.Com
 			template := "dev"
 			if !dev {
 				return fmt.Errorf("init requires --dev or use stack init <template>")
+			}
+			if runBootstrap {
+				if operatorURL != nil && *operatorURL != "" {
+					return fmt.Errorf("--bootstrap installs local host tools and cannot be used with --operator")
+				}
+				report, err := bootstrapRun(cmd.Context(), bootstrap.Options{Stdout: stderr, Stderr: stderr})
+				if writeErr := bootstrapWriteReport(stderr, report); writeErr != nil {
+					return writeErr
+				}
+				if err != nil {
+					return err
+				}
 			}
 			path := ""
 			if len(args) == 1 {
@@ -111,10 +129,38 @@ func initCommand(stdout, stderr io.Writer, root, operatorURL *string) *cobra.Com
 		},
 	}
 	cmd.Flags().BoolVar(&dev, "dev", false, "use the dev stack template")
+	cmd.Flags().BoolVar(&runBootstrap, "bootstrap", false, "install missing mandatory dev host tools before initializing")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite a non-empty stack root")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "accept template defaults and run non-interactively")
 	cmd.Flags().StringArrayVar(&inputs, "input", nil, "template input K=V")
 	cmd.AddCommand(initStackCommand(stdout, root, operatorURL))
+	return cmd
+}
+
+func bootstrapCommand(stdout, stderr io.Writer, jsonOutput *bool) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "bootstrap",
+		Short: "Install missing mandatory dev host tools",
+		Long: "Install the host commands required by the default Angee development stack.\n\n" +
+			"Bootstrap checks git, Go, uv, Node.js, pnpm, npx, Docker, and process-compose. " +
+			"Tools that cannot be installed automatically on this host are reported with manual install hints.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			report, err := bootstrapRun(cmd.Context(), bootstrap.Options{Stdout: stderr, Stderr: stderr, DryRun: dryRun})
+			if *jsonOutput {
+				if writeErr := writeJSON(stdout, report); writeErr != nil {
+					return writeErr
+				}
+			} else {
+				if writeErr := bootstrapWriteReport(stdout, report); writeErr != nil {
+					return writeErr
+				}
+			}
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be installed without running installers")
 	return cmd
 }
 

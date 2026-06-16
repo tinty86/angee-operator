@@ -19,7 +19,8 @@ templates at `templates/workspaces` or legacy `.templates/workspaces`, it uses
 
 ```sh
 angee doctor
-angee init --dev [path] [--input key=value ...] [--yes] [--force]
+angee bootstrap [--dry-run]
+angee init --dev [path] [--bootstrap] [--input key=value ...] [--yes] [--force]
 angee stack init <template> [path] [--input key=value ...] [--yes] [--force]
 angee stack update [--template] [--dry-run]
 angee stack destroy [--purge]
@@ -27,7 +28,8 @@ angee status
 ```
 
 `angee init --dev` is shorthand for the `dev` stack template. The template must
-be available through the local or remote template resolver.
+be available through the local or remote template resolver. `--bootstrap` runs
+`angee bootstrap` first, then renders the template.
 
 `angee stack update` regenerates the derived runtime files from `angee.yaml`.
 With `--template` it first **re-renders `angee.yaml` from the stack's Copier

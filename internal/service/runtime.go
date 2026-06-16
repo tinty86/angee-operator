@@ -86,6 +86,11 @@ func (p *Platform) StackDev(ctx context.Context, build bool) error {
 	if err != nil {
 		return err
 	}
+	if stackUsesLocalRuntime(stack) {
+		if err := ensureRuntimeAvailable(ctx, p.procBackend); err != nil {
+			return err
+		}
+	}
 	if err := p.bootstrapOpenBao(ctx, stack, nil, nil); err != nil {
 		return err
 	}
@@ -110,6 +115,11 @@ func (p *Platform) StackDevForeground(ctx context.Context, build bool, stdout io
 	stack, err := p.LoadStack()
 	if err != nil {
 		return err
+	}
+	if stackUsesLocalRuntime(stack) {
+		if err := ensureRuntimeAvailable(ctx, p.procBackend); err != nil {
+			return err
+		}
 	}
 	if err := p.bootstrapOpenBao(ctx, stack, stdout, stderr); err != nil {
 		return err
@@ -185,6 +195,34 @@ func (p *Platform) StackDevForeground(ctx context.Context, build bool, stdout io
 		})
 	}
 	return g.Wait()
+}
+
+type runtimeAvailabilityChecker interface {
+	EnsureAvailable(context.Context) error
+}
+
+func ensureRuntimeAvailable(ctx context.Context, backend runtime.Backend) error {
+	if checker, ok := backend.(runtimeAvailabilityChecker); ok {
+		return checker.EnsureAvailable(ctx)
+	}
+	return nil
+}
+
+func stackUsesLocalRuntime(stack *manifest.Stack) bool {
+	if stack == nil {
+		return false
+	}
+	for _, service := range stack.Services {
+		if service.Runtime == manifest.RuntimeLocal {
+			return true
+		}
+	}
+	for _, job := range stack.Jobs {
+		if job.Runtime == manifest.RuntimeLocal {
+			return true
+		}
+	}
+	return false
 }
 
 // guardDevSink wraps w so concurrent writes from the two dev backends serialize,

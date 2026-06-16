@@ -65,7 +65,9 @@ build_from_source() {
   echo "  ✔ angee ${BUILD_VERSION} installed to ${INSTALL_DIR}/angee"
   echo ""
   echo "  Get started:"
-  echo "    angee init --dev --yes"
+  echo "    git clone https://github.com/ang-ee/angee-django.git"
+  echo "    cd angee-django"
+  echo "    angee init --dev --bootstrap"
   echo "    angee dev"
   echo ""
   exit 0
@@ -116,7 +118,9 @@ if [ -n "${ANGEE_DIST_DIR:-}" ]; then
   fi
   echo ""
   echo "  Get started:"
-  echo "    angee init --dev --yes"
+  echo "    git clone https://github.com/ang-ee/angee-django.git"
+  echo "    cd angee-django"
+  echo "    angee init --dev --bootstrap"
   echo "    angee dev"
   echo ""
   exit 0
@@ -181,6 +185,8 @@ if [ -f "${INSTALL_DIR}/angee-operator" ]; then
 fi
 echo ""
 echo "  Get started:"
-echo "    angee init --dev --yes"
+echo "    git clone https://github.com/ang-ee/angee-django.git"
+echo "    cd angee-django"
+echo "    angee init --dev --bootstrap"
 echo "    angee dev"
 echo ""

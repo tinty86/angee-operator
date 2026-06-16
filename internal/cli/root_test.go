@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ang-ee/angee-operator/api"
+	"github.com/ang-ee/angee-operator/internal/bootstrap"
 	"github.com/ang-ee/angee-operator/internal/manifest"
 )
 
@@ -84,6 +87,76 @@ func TestInitDevForceAllowsNonEmptyRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".angee", "angee.yaml")); err != nil {
 		t.Fatalf("Stat(angee.yaml) error = %v", err)
+	}
+}
+
+func TestInitDevBootstrapRunsBeforeStackInit(t *testing.T) {
+	root := t.TempDir()
+	writeStackTemplate(t, root)
+	t.Chdir(root)
+
+	called := false
+	oldRun := bootstrapRun
+	oldWrite := bootstrapWriteReport
+	bootstrapRun = func(context.Context, bootstrap.Options) (bootstrap.Report, error) {
+		called = true
+		return bootstrap.Report{Summary: bootstrap.Summary{Present: len(bootstrap.MandatoryTools())}}, nil
+	}
+	bootstrapWriteReport = func(w io.Writer, _ bootstrap.Report) error {
+		_, err := io.WriteString(w, "bootstrap ok\n")
+		return err
+	}
+	t.Cleanup(func() {
+		bootstrapRun = oldRun
+		bootstrapWriteReport = oldWrite
+	})
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewRoot(&stdout, &stderr)
+	cmd.SetArgs([]string{"init", "--dev", "--bootstrap", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !called {
+		t.Fatal("bootstrap was not called")
+	}
+	if !strings.Contains(stderr.String(), "bootstrap ok") {
+		t.Fatalf("stderr = %q, want bootstrap report", stderr.String())
+	}
+	want := "stack template dev initialized as .angee"
+	if got := strings.TrimSpace(stdout.String()); got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestBootstrapCommandSupportsDryRun(t *testing.T) {
+	var gotDryRun bool
+	oldRun := bootstrapRun
+	oldWrite := bootstrapWriteReport
+	bootstrapRun = func(_ context.Context, opts bootstrap.Options) (bootstrap.Report, error) {
+		gotDryRun = opts.DryRun
+		return bootstrap.Report{Summary: bootstrap.Summary{DryRun: 1}}, nil
+	}
+	bootstrapWriteReport = func(w io.Writer, _ bootstrap.Report) error {
+		_, err := io.WriteString(w, "bootstrap dry run\n")
+		return err
+	}
+	t.Cleanup(func() {
+		bootstrapRun = oldRun
+		bootstrapWriteReport = oldWrite
+	})
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewRoot(&stdout, &stderr)
+	cmd.SetArgs([]string{"bootstrap", "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !gotDryRun {
+		t.Fatal("bootstrap dry-run option was not passed through")
+	}
+	if got := stdout.String(); !strings.Contains(got, "bootstrap dry run") {
+		t.Fatalf("stdout = %q, want bootstrap report", got)
 	}
 }
 
